@@ -175,9 +175,9 @@ class SparkRemoteSessionSpec extends AnyFlatSpec with Matchers with SharedSparkS
     {"name":"clover","age":6}
     */
     val jsonTableRows = results.head.consoleOutput.split("\n")
-    jsonTableRows(1) shouldEqual "{\"name\":\"scott\",\"age\":37}"
-    jsonTableRows(2) shouldEqual "{\"name\":\"willow\",\"age\":12}"
-    jsonTableRows(3) shouldEqual "{\"name\":\"clover\",\"age\":6}"
+    jsonTableRows(0) shouldEqual "{\"name\":\"scott\",\"age\":37}"
+    jsonTableRows(1) shouldEqual "{\"name\":\"willow\",\"age\":12}"
+    jsonTableRows(2) shouldEqual "{\"name\":\"clover\",\"age\":6}"
   }
 
   override def beforeAll(): Unit = {
