@@ -12,7 +12,6 @@ lazy val root = (project in file(".")).settings(
   Compile / mainClass := Some("com.coffeeco.data.SparkInceptionControllerApp")
 )
 
-
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % SparkVersion /*% "provided"*/,
   "org.apache.spark" %% "spark-hive" % SparkVersion /*% "provided"*/,
@@ -23,6 +22,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-compiler" % scalaVersion.toString() % Compile,
   "org.scala-lang" % "scala-reflect" % scalaVersion.toString() % Compile,
   "redis.clients" % "jedis" % JedisVersion,
+  "com.redislabs" %% "spark-redis" % "3.1.0",
   "com.typesafe" % "config" % "1.3.1",
   "org.scalactic" %% "scalactic" % "3.2.0",
   "org.apache.spark" %% "spark-sql" % SparkVersion % Test classifier "tests",

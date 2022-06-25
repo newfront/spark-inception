@@ -18,5 +18,17 @@ object SparkInceptionControllerApp extends SparkApplication {
   override def validateConfig()(implicit sparkSession: SparkSession) = true
 
   // Remote Session Controller
+  override def run(): Unit = {
+    logger.info("This block will create the StreamingQuery, and monitor the streaming progress of the app")
+    // 1. This application takes advantage of the DataStreamReader and DataStreamWriter interfaces to connect
+    // to a Streaming Source / Sink
+    // 2. We treat each Row within each MicroBatch as a synchronous series of RPC commands.
+    // 2a. Each command is evaluated separately (just like with a traditional
+    // notebook environment (notebook - name: tests, paragraphs: Seq(a,b,c,d,e...) etc
+    // 2b. Success and Failures are propagated back over the DataStreamWriter (using the streaming sink of your choice)
+
+    // add
+    sparkSession.readStream.format("redis")
+  }
 
 }

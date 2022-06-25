@@ -182,18 +182,24 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
     sparkILoop
   }
 
+  /**
+   * Cleans up the application. Should be part of the SparkApplication shutdown process
+   *  additionally you can also just use sys.addShutdownHook { sparkRemoteSession.close() }
+   *  just make sure you close up shop after stopping the outer Spark Application
+   */
   def close(): Unit = {
+
+    // these are all autoflushing - lets force flush then close up shop
     this.replOutputStream.flush()
     this.consolePrintStream.flush()
     this.outputStream.flush()
-    // need to return this result back to the Spark Application when closing up...
-    val finalOutput = readOutput()
-    logger.info(s"final.output=$finalOutput")
     // clean up after ourselves
     this.replOutputStream.close()
     this.outputStream.close()
     this.consolePrintStream.close()
-    this.sparkILoop.closeInterpreter()
+    if (this.isInitialized.get()) {
+      this.sparkILoop.closeInterpreter()
+    }
   }
   // sparkILoop.replOutput (gives all the information from IMain)
   // sparkILoop.settings (cascade of all the things)
@@ -226,13 +232,11 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
       val results = Console.withOut(consolePrintStream) {
         // redirect the console output
         System.setOut(Console.out)
-
-        // interpret line of the command separately
-        // this way we know which command in a series failed
         parsed._1 match {
           case SparkCommand =>
             logger.debug("spark.scala.commands")
-            // trigger scala directly at the SparkILoop
+            // trigger scala compiler/eval/loop directly at the SparkILoop
+            // note: MAGIC HAPPENING HERE
             parsed._2.map(processSparkScala)
           case SparkSQLCommand =>
             logger.debug("spark.sql.commands")
@@ -274,6 +278,10 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
    * @return The results of interpreting the Spark SQL Command
    */
   def processSparkSQL(cmd: String): (String, Seq[String]) = {
+    // note: In the case where you want delete protection for tables
+    // or want to add specific limits (like limit 10 for open queries)
+    // then you can parse the cmd string and add magic
+
     Try(app.sparkSession.sql(cmd)) match {
       case Success(df: DataFrame) =>
         (Status.Success, df.toJSON.collect().toSeq)
@@ -317,7 +325,6 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
       case _ => str
     }
     out.trim
-
   }
 
 }
