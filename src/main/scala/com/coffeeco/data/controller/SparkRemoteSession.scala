@@ -2,23 +2,26 @@ package com.coffeeco.data.controller
 
 import com.coffeeco.data.SparkInceptionControllerApp
 import com.coffeeco.data.controller.SparkRemoteSession.InitializationCommands
-import com.coffeeco.data.rpc.{NetworkCommand, NetworkCommandResult}
+import com.coffeeco.data.rpc.Command.{SparkCommand, SparkSQLCommand, UnsupportedCommand}
+import com.coffeeco.data.rpc.{Command, NetworkCommand, NetworkCommandResult, Status}
 import com.coffeeco.data.traits.SparkApplication
 import org.apache.commons.io.output.ByteArrayOutputStream
 import org.apache.log4j.Logger
 import org.apache.spark.repl.SparkILoop
+import org.apache.spark.sql.DataFrame
 
-import java.io.File
+import java.io.{File, PrintStream}
 import java.net.URL
 import java.nio.file.{Files, Paths}
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.reflect.ClassTag
 import scala.reflect.internal.util.ScalaClassLoader.URLClassLoader
 import scala.tools.nsc.Settings
 import scala.util.Properties.{javaVersion, javaVmName, versionString}
+import scala.util.{Failure, Success, Try}
 
 object SparkRemoteSession {
   val logger: Logger = Logger.getLogger("com.coffeeco.data.controller.SparkRemoteSession")
-
   /*
     The initialization command bootstraps the internal SparkILoop.
     See https://github.com/apache/spark/blob/v3.2.1/repl/src/main/scala-2.12/org/apache/spark/repl/SparkILoop.scala#L45
@@ -35,7 +38,6 @@ object SparkRemoteSession {
     @transient val spark = SparkInceptionControllerApp.sparkSession
     println(spark)
     """,
-
     "import org.apache.spark.SparkContext._",
     "import spark.implicits._",
     "import org.apache.spark.sql.functions._"
@@ -66,21 +68,29 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
   // exists (inside of) the SparkInceptionControllerApp, and runs in its own separate
   // runtime Context.
 
+  val isInitialized: AtomicBoolean = new AtomicBoolean(false)
+
+  // enables setting of user_jars, if empty nothing will be loaded
+  val extraJarsDir: String = app.sparkSession.conf.get(app.appConfigProps.ReplExtraJarsDir, "")
+  // storage location for dynamic compiled classes and for replaying the console history
   val replClassDirectory: String = app.sparkSession.conf.get(
     app.appConfigProps.ReplClassDir,
     sys.props.getOrElse("java.io.tmpdir", ""))
 
-  // enables setting of user_jars, if empty nothing will be loaded
-  val extraJarsDir: String = app.sparkSession.conf.get(app.appConfigProps.ReplExtraJarsDir, "")
+  // save the initial Console output stream
+  private[this] final val initialConsoleOutputStream: PrintStream = System.out;
 
-  val ReplOutputStream = new ByteArrayOutputStream()
-  private[this] final val outputStream = new JPrintWriter(ReplOutputStream, true)
+  // use this stream to capture console output (like when printing tables)
+  val replOutputStream = new ByteArrayOutputStream()
+  // forwarding std.out PrintStream to the replOutputStream (^^)
+  private[this] final val consolePrintStream = new PrintStream(replOutputStream,true)
+  private[this] final val outputStream = new JPrintWriter(replOutputStream, true)
   private[this] var _contextClassLoader: ClassLoader = Thread.currentThread().getContextClassLoader
 
   /* where our dynamic classes will be written out to */
   val outputDir: File = {
     val f = Files.createTempDirectory(Paths.get(replClassDirectory), "spark").toFile
-    f.deleteOnExit()
+    f.deleteOnExit() // works with normal exit
     f
   }
 
@@ -94,21 +104,25 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
    */
   def readOutput(): Seq[String] = {
     synchronized {
-      val result = this.ReplOutputStream.toString("utf-8").split("\n").toSeq
-      this.ReplOutputStream.reset()
+      this.replOutputStream.flush()
+      val result = this.replOutputStream.toString("utf-8")
+        .split("\n")
+        .toSeq
+        .map(filterOutput)
+        .filter(_.nonEmpty)
+      this.replOutputStream.reset()
       result
     }
   }
 
-  def close(): Unit = {
-    this.ReplOutputStream.flush()
-    // need to return this result back to the Spark Application when closing up...
-    val finalOutput = readOutput()
-    // clean up after ourselves
-    this.ReplOutputStream.close()
+  def initialize(): Unit = {
+    if (!this.isInitialized.get()) {
+      logger.info("sparkILoop.starting.up")
+      if (sparkILoop.isInitializeComplete) {
+        this.isInitialized.set(true)
+      }
+    }
   }
-
-  logger.info(s"replClassDirectory=$replClassDirectory fullPath=${outputDir.getAbsolutePath}")
 
   lazy val sparkILoop: SparkILoop = {
     val sets: Settings = new Settings
@@ -158,6 +172,7 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
         echo("Type :help for more information.")
       }
     }
+
     sparkILoop.settings = sets
     // load the jar for this class
     sparkILoop.createInterpreter()
@@ -166,15 +181,31 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
 
     sparkILoop
   }
+
+  def close(): Unit = {
+    this.replOutputStream.flush()
+    this.consolePrintStream.flush()
+    this.outputStream.flush()
+    // need to return this result back to the Spark Application when closing up...
+    val finalOutput = readOutput()
+    logger.info(s"final.output=$finalOutput")
+    // clean up after ourselves
+    this.replOutputStream.close()
+    this.outputStream.close()
+    this.consolePrintStream.close()
+    this.sparkILoop.closeInterpreter()
+  }
   // sparkILoop.replOutput (gives all the information from IMain)
   // sparkILoop.settings (cascade of all the things)
 
   /**
+   * THIS IS WHERE THE MAGIC HAPPENS:
    * Will trigger an action (evaluating the Remote NetworkCommand in the SparkILoop via the SparkRemoteSession)
    * @param cmd The NetworkCommand being processed
    * @return The results of processing the command
    */
   def processCommand(cmd: NetworkCommand): Seq[NetworkCommandResult] = {
+    initialize()
     // what does the inbound command look like?
     val user = cmd.userId.getOrElse("nobody")
     logger.info(s"network.command.received\n" +
@@ -187,26 +218,106 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
 
     // Regarding Security: The following check is a basic example of user gating:
     // ONLY IF the cmd.userId matches the SparkInceptionController (HADOOP_USER_NAME) do we proceed
-    if (authCheck(user)) {
-      logger.info(s"security.gate.passed")
+    val parsed = cmd.parse()
+    if (parsed._1 != Command.UnsupportedCommand && authCheck(user)) {
+      logger.debug(s"security.gate.passed")
+
       // evaluate the command
-      val results = cmd.command.split("\n").filter(_.nonEmpty).toSeq.map { networkCommand =>
-        val result = sparkILoop.interpret(networkCommand, synthetic = true)
-        val consoleOutput = readOutput()
-        (result, consoleOutput)
+      val results = Console.withOut(consolePrintStream) {
+        // redirect the console output
+        System.setOut(Console.out)
+
+        // interpret line of the command separately
+        // this way we know which command in a series failed
+        parsed._1 match {
+          case SparkCommand =>
+            logger.debug("spark.scala.commands")
+            // trigger scala directly at the SparkILoop
+            parsed._2.map(processSparkScala)
+          case SparkSQLCommand =>
+            logger.debug("spark.sql.commands")
+            // we can natively submit the full SQL command
+            // and match the output format
+            parsed._2.map(processSparkSQL)
+          case _ =>
+            // we shouldn't get here...
+            // make the compiler happy
+            Seq((Status.Failure, Seq(s"${cmd.command} is not supported")))
+        }
       }
+      System.setOut(initialConsoleOutputStream)
+
       results.map { result =>
         NetworkCommandResult(
           requestId = cmd.requestId,
-          commandStatus = result._1.toString,
-          consoleOutput = result._2.mkString("\n")
+          commandStatus = result._1,
+          consoleOutput = (result._2).mkString("\n")
         )
       }
     } else Seq(NetworkCommandResult(cmd.requestId, "Failure", s"$user is not authorized"))
   }
 
+  /**
+   * Using the SparkILoop, eval code, interact with live Spark directly
+   * @param cmd The scala block to evaluate
+   * @return The results of running the Scala block
+   */
+  def processSparkScala(cmd: String): (String, Seq[String]) = {
+    val result = sparkILoop.interpret(cmd, synthetic = true)
+    val consoleOutput = readOutput()
+    (result.toString, consoleOutput)
+  }
+
+  /**
+   * Using the Native app.sparkSession pointer run Spark SQL commands directly
+   * @param cmd The SQL command will fail or succeed, stack trace will be output in the case of a failure
+   * @return The results of interpreting the Spark SQL Command
+   */
+  def processSparkSQL(cmd: String): (String, Seq[String]) = {
+    Try(app.sparkSession.sql(cmd)) match {
+      case Success(df: DataFrame) =>
+        (Status.Success, df.toJSON.collect().toSeq)
+      case Failure(ex: Exception) =>
+        ex.printStackTrace(consolePrintStream)
+        (Status.Failure, readOutput())
+      case Failure(thr: Throwable) =>
+        thr.printStackTrace(consolePrintStream)
+        (Status.Failure, readOutput())
+      case _ =>
+        (Status.Failure, Seq("Something went wrong"))
+    }
+  }
+
+  /**
+   * Basic check - not comprehensive security
+   *
+   * @param user The name of the user of an inbound Command
+   * @return True if we want to process the inbound command, false for auth block
+   */
   def authCheck(user: String): Boolean = {
     user == app.sparkSession.sparkContext.sparkUser
+  }
+
+  private[this] val scalaTypePrefixPattern = "^\\$ires\\w*\\:\\W[A-Za-z]*\\W\\=\\W*".r
+
+  /**
+   * Use this method to filter the Notebook processing output. Eg. do you care about class definitions or types?
+   * what about formatting the output - like df.show(10, true) will convert to a console printed table.
+   * Do you want to see that $iresN Unit: ()? probably not
+   *
+   * @param str The string to evaluate
+   * @return empty string or cleaned string
+   */
+  def filterOutput(str: String): String = {
+
+    val out = str match {
+      case _ if str.startsWith("##") => ""
+      case st if str.startsWith("$ires") =>
+        scalaTypePrefixPattern.replaceFirstIn(st, "")
+      case _ => str
+    }
+    out.trim
+
   }
 
 }
