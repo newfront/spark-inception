@@ -71,10 +71,10 @@ class SparkRemoteSession[T <: SparkApplication : ClassTag](app: T, replInitializ
   val isInitialized: AtomicBoolean = new AtomicBoolean(false)
 
   // enables setting of user_jars, if empty nothing will be loaded
-  val extraJarsDir: String = app.sparkSession.conf.get(app.appConfigProps.ReplExtraJarsDir, "")
+  val extraJarsDir: String = app.sparkSession.conf.get(app.appConfig.ReplExtraJarsDir, "")
   // storage location for dynamic compiled classes and for replaying the console history
   val replClassDirectory: String = app.sparkSession.conf.get(
-    app.appConfigProps.ReplClassDir,
+    app.appConfig.ReplClassDir,
     sys.props.getOrElse("java.io.tmpdir", ""))
 
   // save the initial Console output stream

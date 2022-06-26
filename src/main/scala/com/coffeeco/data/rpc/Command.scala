@@ -18,7 +18,18 @@ object Command extends Enumeration {
   }
 }
 
+object Status {
+  val Success: String = "Success"
+  val Failure: String = "Failure"
+}
 
+trait NotebookRequest {
+  val notebookId: String
+  val paragraphId: String
+  val command: String
+  val requestId: String
+  val userId: Option[String]
+}
 /**
  * The Remote Network Command
  * @param notebookId The Notebook Identifier associated with the command
@@ -27,13 +38,13 @@ object Command extends Enumeration {
  * @param requestId The RequestId that can be used for tracing
  * @param userId The Optional userId associated with the command (will runAs SPARK_USER=this)
  */
-
+@SerialVersionUID(1L)
 case class NetworkCommand(
   notebookId: String,
   paragraphId: String,
   command: String,
   requestId: String,
-  userId: Option[String] = Some("nobody")) extends Serializable {
+  userId: Option[String] = Some("nobody")) extends NotebookRequest with Serializable {
     @transient lazy val commands: Seq[String] = command.trim.split("\n").map(_.trim).filter(_.nonEmpty)
 
     def parse(): (Command.Value, Seq[String]) = {
@@ -50,17 +61,41 @@ case class NetworkCommand(
     }
 }
 
-object Status {
-  val Success: String = "Success"
-  val Failure: String = "Failure"
+trait NotebookResult {
+  val requestId: String
+  val commandStatus: String
+  val consoleOutput: String
 }
+
 /**
  * The Results of processing the NetworkCommand
  * @param requestId The requestId associated with the command + context
  * @param commandStatus The status of evaluating the command
  * @param consoleOutput The result (output) from the remote command
  */
+@SerialVersionUID(2L)
 case class NetworkCommandResult(
   requestId: String,
   commandStatus: String,
-  consoleOutput: String) extends Serializable
+  consoleOutput: String) extends NotebookResult with Serializable
+
+/**
+ * Use this composite object to store the entire transaction
+ * @param notebookId The notebookId
+ * @param paragraphId The paragraphId
+ * @param command The commands (for the paragraph)
+ * @param requestId The requestId (for tracing)
+ * @param userId The userId (associated with the request)
+ * @param results The collection of command level results (for supporting multiple commands)
+ */
+@SerialVersionUID(3L)
+case class NotebookExecutionDetails(
+  notebookId: String,
+  paragraphId: String,
+  command: String,
+  requestId: String,
+  userId: Option[String],
+  results: Seq[NetworkCommandResult]) extends NotebookRequest with Serializable
+
+
+

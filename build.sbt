@@ -8,7 +8,7 @@ lazy val root = (project in file(".")).settings(
   version := "1.0.0-SNAPSHOT",
   organization := "com.coffeeco.data",
   name := "spark-inception-controller",
-  scalaVersion := "2.12.13",
+  scalaVersion := "2.12.12",
   Compile / mainClass := Some("com.coffeeco.data.SparkInceptionControllerApp")
 )
 
@@ -16,13 +16,14 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % SparkVersion /*% "provided"*/,
   "org.apache.spark" %% "spark-hive" % SparkVersion /*% "provided"*/,
   "org.apache.spark" %% "spark-sql" % SparkVersion /*% "provided"*/,
+  "org.apache.spark" %% "spark-tags" % SparkVersion,
   "org.apache.spark" %% "spark-repl" % SparkVersion,
   "org.apache.commons" % "commons-pool2" % CommonsPoolVersion,
   "org.scala-lang" % "scala-library" % scalaVersion.toString() % Compile,
   "org.scala-lang" % "scala-compiler" % scalaVersion.toString() % Compile,
   "org.scala-lang" % "scala-reflect" % scalaVersion.toString() % Compile,
   "redis.clients" % "jedis" % JedisVersion,
-  "com.redislabs" %% "spark-redis" % "3.1.0",
+  "com.redislabs" %% "spark-redis" % "3.1.0" % Compile,
   "com.typesafe" % "config" % "1.3.1",
   "org.scalactic" %% "scalactic" % "3.2.0",
   "org.apache.spark" %% "spark-sql" % SparkVersion % Test classifier "tests",
@@ -44,27 +45,6 @@ assembly / assemblyMergeStrategy := {
     MergeStrategy.concat
   case PathList(ps@_*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) =>
     MergeStrategy.rename
-  /*case PathList("META-INF", xs@_*) =>
-    xs map {
-      _.toLowerCase
-    } match {
-      case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) =>
-        MergeStrategy.discard
-      case ps@(x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") =>
-        MergeStrategy.discard
-      case "plexus" :: xs =>
-        MergeStrategy.discard
-      case "services" :: "org.apache.spark.sql.sources.DataSourceRegister" :: Nil =>
-        // important: This enables the external kafka data source to be used without the fully qualified class name.
-        // Essentially, you get to use df.write.format("kafka") vs df.write.format("org.apache.spark.sql.kafka010.KafkaSourceProvider")
-        // you decide what is nicer
-        MergeStrategy.concat
-      case "services" :: xs =>
-        MergeStrategy.filterDistinctLines
-      case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) =>
-        MergeStrategy.filterDistinctLines
-      case _ => MergeStrategy.deduplicate
-    }*/
   case _ =>
     MergeStrategy.discard
 }
