@@ -134,4 +134,21 @@ Which will give you the table `(df.toJSON.collect.mkString("\n"))` of the **peop
 
 That's it. You now have a Streaming Notebook environment using Spark to power the dynamic generation of new Spark applications, or just to fiddle around with and come up with whacky new ideas! 
 
-
+## Making things Simpler
+You can start the entire Spark Inception Controller using a single command. Now you have less the think about if you want to bother with other things.
+~~~
+docker run \
+  -p 4040:4040 \
+  --hostname spark-inception-controller \
+  --network mde \
+  -it newfrontdocker/spark-inception-controller:1.0.0 \
+  /opt/spark/bin/spark-submit \
+  --verbose \
+  --master "local[*]" \
+  --class "com.coffeeco.data.SparkInceptionControllerApp" \
+  --deploy-mode "client" \
+  --jars "/opt/spark/app/jars/spark-inception-controller.jar" \
+  --conf "spark.driver.extraClassPath=/opt/spark/app/jars/spark-inception-controller.jar" \
+  --driver-java-options "-Dconfig.file=/opt/spark/app/conf/application-live.conf" \
+  /opt/spark/app/jars/spark-inception-controller.jar
+~~~
