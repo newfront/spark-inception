@@ -7,7 +7,7 @@ import org.apache.spark.sql.SparkSession
 trait SparkApplication extends App {
 
   val appName = Configuration.appName
-  def appConfig: SparkAppConfig = AppConfig()
+  def appConfig: AppConfig = AppConfig()
 
   /**
    * Generate the sparkConf, TypeSafeConfig (tsc: Configuration) is mixed in only if the values

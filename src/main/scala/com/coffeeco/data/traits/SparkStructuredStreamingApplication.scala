@@ -12,7 +12,6 @@ import org.apache.spark.sql.streaming.{DataStreamReader, DataStreamWriter, Strea
  * @tparam U The type parameter for the DataStreamWriter
  */
 trait SparkStructuredStreamingApplication[T, U] extends SparkApplication {
-  override val appConfig: SparkAppConfig = AppConfig()
 
   /**
    * The appConfig values will be tested in the base run method

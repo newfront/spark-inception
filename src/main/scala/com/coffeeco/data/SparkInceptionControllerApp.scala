@@ -5,7 +5,7 @@ import com.coffeeco.data.processor.NetworkCommandProcessor
 import com.coffeeco.data.rpc.{NetworkCommand, NotebookExecutionDetails}
 import com.coffeeco.data.traits.SparkStructuredStreamingApplication
 import org.apache.log4j.Logger
-import org.apache.spark.sql.streaming.{DataStreamReader, DataStreamWriter, StreamingQuery}
+import org.apache.spark.sql.streaming.{DataStreamReader, DataStreamWriter, StreamingQuery, Trigger}
 import org.apache.spark.sql.{Dataset, Encoders, SaveMode, SparkSession}
 
 object SparkInceptionControllerApp extends SparkStructuredStreamingApplication[NetworkCommand, NetworkCommand] {
@@ -19,9 +19,16 @@ object SparkInceptionControllerApp extends SparkStructuredStreamingApplication[N
       .schema(Encoders.product[NetworkCommand].schema)
   }
 
+  /**
+   * Use to control the general options on the output Stream
+   * @param writer The DataStreamWriter reference
+   * @param sparkSession The implicit SparkSession
+   * @return The decorated DataStreamWriter
+   */
   override def outputStream(writer: DataStreamWriter[NetworkCommand])
                            (implicit sparkSession: SparkSession)
   : DataStreamWriter[NetworkCommand] = super.outputStream(writer)
+    .trigger(Trigger.ProcessingTime("5 seconds"))
 
   @transient implicit lazy val sparkRemoteSession: SparkRemoteSession[_] = SparkRemoteSession()
   /**
@@ -31,54 +38,29 @@ object SparkInceptionControllerApp extends SparkStructuredStreamingApplication[N
    * @return The StreamingQuery (which is the full source->transform->sink.start)
    */
   override def runApp(): StreamingQuery = {
+    logger.info(s"run.app.called")
     import sparkSession.implicits._
-
-    // note: the output table name is modifiable via configs - update the typesafe config to add a name
-    val outputTableName: String = sparkSession.conf.get(appConfig.SinkToTableName, appConfig.SinkToTableNameDefault)
-    // create a reference to our SparkRemoteSession instance (scoped at the driver)
 
     // the inception pipeline
-    val processor = NetworkCommandProcessor(sparkSession)
     outputStream(
-      processor.process(
-        inputStream.load().as[NetworkCommand])
-        .writeStream
-    ).foreachBatch((ds: Dataset[NetworkCommand], batchId: Long) =>
-      processBatch(ds, batchId)
+      NetworkCommandProcessor(sparkSession).process(
+        inputStream.load().as[NetworkCommand]
+      ).writeStream
+    ).foreachBatch((ds: Dataset[NetworkCommand], batchId: Long) => processBatch(ds, batchId)
     ).start()
-      /*.foreachBatch((ds: Dataset[NetworkCommand], batchId: Long) => {
-      val results = ds.map { networkCommand =>
-        logger.info(s"executing.network.command=$networkCommand streaming.batch.id=$batchId")
-
-        val res = remoteSessionController.processCommand(networkCommand)
-        // wrap the execution details so we can write the results to redis
-        NotebookExecutionDetails(
-          networkCommand.notebookId,
-          networkCommand.paragraphId,
-          networkCommand.command,
-          networkCommand.requestId,
-          networkCommand.userId,
-          res
-        )
-      }
-      // note: you can use the batchId if you wanted to add [batchId|requestId] deduplication
-      // will write the results out to a HashTable structure in Redis
-      results.write
-        .format("org.apache.spark.sql.redis")
-        .option("table", s"$outputTableName")
-        .mode(SaveMode.Append)
-        .save()
-    }).start()*/
   }
 
+  /**
+   * For each micro-batch, collect the RPC command stream to the driver, process, and pass the results onto Redis
+   * @param ds The RPC commands (via Redis)
+   * @param batchId The batchId (can be used to skip reprocessing events if checkpoints are enabled)
+   */
   def processBatch(ds: Dataset[NetworkCommand], batchId: Long): Unit = {
     import sparkSession.implicits._
-    val outputTableName: String = sparkSession.conf.get(appConfig.SinkToTableName, appConfig.SinkToTableNameDefault)
 
     // Collect all of the Distributed Commands and bring down to the Driver
-    // note: use .set("spark.app.source.options.stream.read.batch.size", "10") to reduce the number of commands you want to read
     val localResults = ds.collect().map { networkCommand =>
-      //logger.info(s"executing.network.command=$networkCommand streaming.batch.id=$batchId")
+      // this is running on the driver now (not the executors)
       val res = sparkRemoteSession.processCommand(networkCommand)
       // wrap the execution details so we can write the results to redis
       NotebookExecutionDetails(
@@ -87,14 +69,19 @@ object SparkInceptionControllerApp extends SparkStructuredStreamingApplication[N
         networkCommand.command,
         networkCommand.requestId,
         networkCommand.userId,
-        res
+        res.commandStatus,
+        res.consoleOutput
       )
     }.toSeq
 
+    // generate a new dataframe and then write back to redis
     val forRedis = sparkSession.createDataset[NotebookExecutionDetails](localResults)
-    forRedis.write
+    forRedis
+      .write
       .format("org.apache.spark.sql.redis")
-      .option("table", s"$outputTableName")
+      .options(sparkSession.sparkContext
+        .getConf
+        .getAllWithPrefix(appConfig.SinkStreamOptions).toMap[String, String])
       .mode(SaveMode.Append)
       .save()
   }

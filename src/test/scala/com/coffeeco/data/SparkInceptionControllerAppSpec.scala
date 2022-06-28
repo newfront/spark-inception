@@ -21,15 +21,6 @@ class SparkInceptionControllerAppSpec extends AnyFlatSpec with Matchers with Sha
     sys.props += (("HADOOP_USER_NAME", "anyone"))
 
     /*
-    "spark.redis.host" = "redis"
-     "spark.redis.port" = "6379"
-      "spark.app.source.format" = "redis" # source format
-      "spark.app.source.options.stream.keys" = "com:coffeeco:notebooks:v1:notebook1:rpc" # the source redis stream
-      "spark.app.source.options.stream.read.batch.size" = "10" #take up to 100 records per batch
-      "spark.app.source.options.stream.read.block" = "1000" #wait up to 1 second while fetching new data
-     */
-
-    /*
     source.stream = com:coffeeco:notebooks:v1:notebook-tests:rpc
     sink.table = com:coffeeco:notebooks:v1:notenook-tests:results
      */
@@ -54,9 +45,17 @@ class SparkInceptionControllerAppSpec extends AnyFlatSpec with Matchers with Sha
   // to start the local redis docker instance
 
   "SparkInceptionControllerApp" should " process xstream commands from redis" in {
+
     implicit val testSession: SparkSession = SparkInceptionControllerApp
       .sparkSession
       .newSession()
+
+    testSession.conf.set("spark.app.source.format", "redis")
+    testSession.conf.set("spark.app.source.options.stream.keys", "com:coffeeco:notebooks:v1:notebook-tests:rpc")
+    testSession.conf.set("spark.app.source.options.stream.read.batch.size", "10")
+    testSession.conf.set("spark.app.source.options.stream.read.block", "1000")
+    testSession.conf.set(appConfig.SinkToTableName, "com:coffeeco:notebooks:v1:notenook-tests:results")
+
     import testSession.implicits._
     implicit val sqlContext: SQLContext = testSession.sqlContext
 
@@ -68,31 +67,45 @@ class SparkInceptionControllerAppSpec extends AnyFlatSpec with Matchers with Sha
         "request1", Some("anyone")),
       NetworkCommand(
         "notebook1",
-        "paragraph1",
+        "paragraph2",
         command = "spark.sql(\"show tables\").show(10)",
         "request2", None),
       NetworkCommand(
         "notebook1",
-        "paragraph2",
+        "paragraph3",
         command =
           """
+            |%spark
             |case class Person(name: String, age: Int)
             |val people = Seq(Person("scott",37),Person("willow",12),Person("clover",6))
             |val df = spark.createDataFrame(people)
             |df.createOrReplaceTempView("people")
             |""".stripMargin,
         "request3", Some("anyone")),
-      NetworkCommand("notebook1", "paragraph3",
+      NetworkCommand(
+        "notebook1",
+        "paragraph4",
         command =
           """
             |spark.sql("show tables").show(10)
             |""".stripMargin,
         "request4", Some("anyone")),
-      NetworkCommand("notebook1", "paragraph5",
+      NetworkCommand(
+        "notebook1",
+        "paragraph5",
         command =
           """
             |%sql
             |spark.sql("select * from people").limit(10).show(10)
+            |""".trim.stripMargin,
+        "request5", Some("anyone")),
+      NetworkCommand(
+        "notebook1",
+        "paragraph6",
+        command =
+          """
+            |%sql
+            |select * from people limit 10
             |""".trim.stripMargin,
         "request6", Some("anyone"))
     )
@@ -101,7 +114,7 @@ class SparkInceptionControllerAppSpec extends AnyFlatSpec with Matchers with Sha
     // add the whole notebook from SparkRemoteSessionSpec
     commandStream.addData(networkCommands)
 
-    val processor = NetworkCommandProcessor(SparkInceptionControllerApp.sparkSession)
+    val processor = NetworkCommandProcessor(testSession)
 
     val commandPipeline = SparkInceptionControllerApp
       .outputStream(processor.process(commandStream.toDS()).writeStream)
@@ -113,7 +126,24 @@ class SparkInceptionControllerAppSpec extends AnyFlatSpec with Matchers with Sha
     streamingQuery.processAllAvailable()
     streamingQuery.stop()
 
+    // simple loopback over the output data
+    testSession
+      .read
+      .format("org.apache.spark.sql.redis")
+      .option("table", testSession.conf.get(appConfig.SinkToTableName))
+      .option("key.column", "paragraphId")
+      .load()
+      .createOrReplaceTempView("notebook_table")
 
+
+
+  }
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+  }
+  override def afterAll(): Unit = {
+    super.afterAll()
   }
 
 }

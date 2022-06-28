@@ -45,9 +45,10 @@ case class NetworkCommand(
   command: String,
   requestId: String,
   userId: Option[String] = Some("nobody")) extends NotebookRequest with Serializable {
+    //
     @transient lazy val commands: Seq[String] = command.trim.split("\n").map(_.trim).filter(_.nonEmpty)
 
-    def parse(): (Command.Value, Seq[String]) = {
+    /*def parse(): (Command.Value, Seq[String]) = {
       if (commands.nonEmpty) {
         val length = commands.length
         // check if the first line (header) exists
@@ -58,7 +59,21 @@ case class NetworkCommand(
             (s, if (hasHeader) commands.splitAt(1)._2 else commands)
         }
       } else (Command.UnsupportedCommand, Seq.empty[String])
-    }
+    }*/
+
+  def parse(): (Command.Value, String) = {
+    if (commands.nonEmpty) {
+      val length = commands.length
+      // check if the first line (header) exists
+      val hasHeader = commands.head.startsWith("%")
+      Command(commands.head) match {
+        case UnsupportedCommand => (UnsupportedCommand, "")
+        case s: Command.Value =>
+          (s, if (hasHeader) commands.splitAt(1)._2.mkString("\n") else command)
+      }
+    } else (Command.UnsupportedCommand, "")
+  }
+
 }
 
 trait NotebookResult {
@@ -86,16 +101,18 @@ case class NetworkCommandResult(
  * @param command The commands (for the paragraph)
  * @param requestId The requestId (for tracing)
  * @param userId The userId (associated with the request)
- * @param results The collection of command level results (for supporting multiple commands)
+ * @param commandStatus Success or Failure
+ * @param result The serialized output of running a given command
  */
-@SerialVersionUID(3L)
+@SerialVersionUID(4L)
 case class NotebookExecutionDetails(
   notebookId: String,
   paragraphId: String,
   command: String,
   requestId: String,
   userId: Option[String],
-  results: Seq[NetworkCommandResult]) extends NotebookRequest with Serializable
+  commandStatus: String,
+  result: String) extends NotebookRequest with Serializable
 
 
 

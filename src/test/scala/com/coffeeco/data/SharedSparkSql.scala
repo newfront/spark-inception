@@ -26,10 +26,14 @@ trait SharedSparkSql extends BeforeAndAfterAll with SparkContextProvider {
 
   override def afterAll() {
     try {
-      _sparkSql.close()
+      // given we are using a Singleton SparkSession
+      // based on the SparkInceptionControllerApp::sparkSession lazy val
+      // we can't close the SQLContext or SparkContext
+      // otherwise the tests will fail
+      /*_sparkSql.close()
       _sparkSql = null
       LocalSparkContext.stop(_sc)
-      _sc = null
+      _sc = null*/
     } finally {
       super.afterAll()
     }
