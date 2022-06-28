@@ -7,8 +7,12 @@ import org.apache.spark.sql.SparkSession
 trait SparkApplication extends App {
 
   val appName = Configuration.appName
-  def appConfigProps: SparkAppConfig
+  def appConfig: AppConfig = AppConfig()
 
+  /**
+   * Generate the sparkConf, TypeSafeConfig (tsc: Configuration) is mixed in only if the values
+   * are missing after Apache Spark generates its view of the Config (defaults, properties, sys props, etc, then tsc)
+   */
   lazy val sparkConf: SparkConf = {
     val coreConf = new SparkConf()
       .setAppName(appName)
@@ -19,6 +23,10 @@ trait SparkApplication extends App {
     coreConf
   }
 
+  /**
+   * Allow for delayed Spark Configuration mixing before generating the sparkSession
+   * given sparkConf is also lazy, you will have a lazy invocation chain which is tight
+   */
   lazy implicit val sparkSession: SparkSession = {
     SparkSession.builder()
       .config(sparkConf)
@@ -28,10 +36,10 @@ trait SparkApplication extends App {
 
   /**
    * ensure that the application can run correctly, and there is no missing or empty config
-   * @param sparkSession The SparkSession
-   * @return true if the application is okay to start
+   * @param sparkSession The implicit SparkSession object
+   * @throws RuntimeException with human readable error
    */
-  def validateConfig()(implicit sparkSession: SparkSession): Boolean = true
+  def validateConfig()(implicit sparkSession: SparkSession): Unit = {}
 
   def run(): Unit = {
     validateConfig()

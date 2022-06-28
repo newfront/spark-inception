@@ -7,6 +7,8 @@ Export your java 11 location to `~/.zshrc`: (example: `export JAVA11_HOME="/Libr
 
 ## Building
 From the root project directory, run the following command.
+
 ```bash
 sbt clean assembly
+docker build . -t mde/spark-inception-controller:1.0.0
 ```

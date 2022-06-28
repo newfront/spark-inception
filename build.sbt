@@ -8,23 +8,29 @@ lazy val root = (project in file(".")).settings(
   version := "1.0.0-SNAPSHOT",
   organization := "com.coffeeco.data",
   name := "spark-inception-controller",
-  scalaVersion := "2.12.13",
-  Compile / mainClass := Some("com.coffeeco.data.SparkInceptionControllerApp")
+  scalaVersion := "2.12.15",
+  Compile / mainClass := Some("com.coffeeco.data.SparkInceptionControllerApp"),
+  assemblyPackageScala / assembleArtifact := false
 )
 
+/*
+ note: once you have spark-core,spark-hive,spark-sql, spark-tags available locally
+ you can test everything, then switch to provided level scope for assembly, since the docker
+ base container already has all the spark jars (save space = $$$ back in your bandwidth pocket)
+ */
 libraryDependencies ++= Seq(
-  "org.apache.spark" %% "spark-core" % SparkVersion /*% "provided"*/,
-  "org.apache.spark" %% "spark-hive" % SparkVersion /*% "provided"*/,
-  "org.apache.spark" %% "spark-sql" % SparkVersion /*% "provided"*/,
-  "org.apache.spark" %% "spark-repl" % SparkVersion,
-  "org.apache.commons" % "commons-pool2" % CommonsPoolVersion,
-  "org.scala-lang" % "scala-library" % scalaVersion.toString() % Compile,
-  "org.scala-lang" % "scala-compiler" % scalaVersion.toString() % Compile,
-  "org.scala-lang" % "scala-reflect" % scalaVersion.toString() % Compile,
+  "org.apache.spark" %% "spark-core" % SparkVersion % Provided,
+  "org.apache.spark" %% "spark-hive" % SparkVersion % Provided,
+  "org.apache.spark" %% "spark-sql" % SparkVersion % Provided,
+  "org.apache.spark" %% "spark-tags" % SparkVersion % Provided,
+  "org.apache.spark" %% "spark-repl" % SparkVersion % Provided,
+  "org.apache.commons" % "commons-pool2" % CommonsPoolVersion % Compile,
+  "org.scala-lang" % "scala-library" % scalaVersion.toString() % Provided,
+  "org.scala-lang" % "scala-compiler" % scalaVersion.toString() % Provided,
+  "org.scala-lang" % "scala-reflect" % scalaVersion.toString() % Provided,
   "redis.clients" % "jedis" % JedisVersion,
-  "com.redislabs" %% "spark-redis" % "3.1.0",
+  "com.redislabs" %% "spark-redis" % "3.1.0" % Compile,
   "com.typesafe" % "config" % "1.3.1",
-  "org.scalactic" %% "scalactic" % "3.2.0",
   "org.apache.spark" %% "spark-sql" % SparkVersion % Test classifier "tests",
   "org.apache.spark" %% "spark-sql" % SparkVersion % Test classifier "test-sources",
   "org.scalatest" %% "scalatest" % "3.2.2" % Test,
@@ -38,35 +44,27 @@ Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD")
 javaOptions ++= Seq("-Xms512M", "-Xmx2048M", "-XX:MaxPermSize=2048M", "-XX:+CMSClassUnloadingEnabled")
 
 // See for more details : https://github.com/sbt/sbt-assembly
+
 assembly / assemblyMergeStrategy := {
-  case "module-info.class" => MergeStrategy.discard
-  case x if Assembly.isConfigFile(x) =>
-    MergeStrategy.concat
-  case PathList(ps@_*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) =>
-    MergeStrategy.rename
-  /*case PathList("META-INF", xs@_*) =>
-    xs map {
-      _.toLowerCase
-    } match {
-      case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) =>
-        MergeStrategy.discard
-      case ps@(x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") =>
-        MergeStrategy.discard
-      case "plexus" :: xs =>
-        MergeStrategy.discard
-      case "services" :: "org.apache.spark.sql.sources.DataSourceRegister" :: Nil =>
-        // important: This enables the external kafka data source to be used without the fully qualified class name.
-        // Essentially, you get to use df.write.format("kafka") vs df.write.format("org.apache.spark.sql.kafka010.KafkaSourceProvider")
-        // you decide what is nicer
-        MergeStrategy.concat
-      case "services" :: xs =>
-        MergeStrategy.filterDistinctLines
-      case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) =>
-        MergeStrategy.filterDistinctLines
-      case _ => MergeStrategy.deduplicate
-    }*/
-  case _ =>
-    MergeStrategy.discard
+  case PathList("io","netty", xs @ _*) => MergeStrategy.last
+  case PathList("javax", "inject", xs @ _*) => MergeStrategy.last
+  case PathList("javax", "servlet", xs @ _*) => MergeStrategy.last
+  case PathList("javax", "activation", xs @ _*) => MergeStrategy.last
+  case PathList("org", "apache", xs @ _*) => MergeStrategy.last
+  case PathList("com", "google", xs @ _*) => MergeStrategy.last
+  case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.last
+  case PathList("com", "codahale", xs @ _*) => MergeStrategy.last
+  case PathList("com", "yammer", xs @ _*) => MergeStrategy.last
+  case "about.html" => MergeStrategy.rename
+  case "META-INF/ECLIPSEF.RSA" => MergeStrategy.last
+  case "META-INF/mailcap" => MergeStrategy.last
+  case "META-INF/mimetypes.default" => MergeStrategy.last
+  case "plugin.properties" => MergeStrategy.last
+  case "log4j.properties" => MergeStrategy.last
+  case "overview.html" => MergeStrategy.last  // Added this for 2.1.0 I think
+  case x =>
+    val oldStrategy = (assembly / assemblyMergeStrategy).value
+    oldStrategy(x)
 }
 
 // Hadoop contains an old protobuf runtime that is not binary compatible with Protobuf
