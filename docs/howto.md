@@ -135,7 +135,7 @@ Which will give you the table `(df.toJSON.collect.mkString("\n"))` of the **peop
 That's it. You now have a Streaming Notebook environment using Spark to power the dynamic generation of new Spark applications, or just to fiddle around with and come up with whacky new ideas! 
 
 ## Making things Simpler
-You can start the entire Spark Inception Controller using a single command. Now you have less the think about if you want to bother with other things.
+You can start the entire Spark Inception Controller using a single command. Now you have less the think about if you want to bother with other things. Just make sure you have started up `redis` as well - otherwise you'll get an error trying to start the application.
 ~~~
 docker run \
   -p 4040:4040 \
