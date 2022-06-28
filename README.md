@@ -17,3 +17,6 @@ docker build . -t mde/spark-inception-controller:1.0.0
 
 ## Running the Inception Controller
 See the [How To: Docs](docs/howto.md) to run everything without needing to build / test / all that.
+
+## Shameless Plug:
+I wrote a book on Apache Spark published in 2022. You'll like it, https://www.amazon.com/Modern-Engineering-Apache-Spark-Hands/dp/1484274512/
